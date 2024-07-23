@@ -1,9 +1,11 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>Subida de Archivos</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subir Archivo</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
     <style>
         body {
             background-color: #2e2e2e; /* Fondo gris oscuro */
@@ -51,57 +53,112 @@
 </head>
 <body>
     <h1>Subir Archivo</h1>
-    <form id="uploadForm" enctype="multipart/form-data">
-        <input type="file" name="file" id="fileInput">
-        <input type="submit" value="Subir">
-    </form>
+
+    <input type="file" id="fileInput">
+    <button onclick="uploadFile()">Subir</button>
+
     <div class="progress-container">
-        <div class="progress-bar" id="progressBar">0%</div>
+        <div id="progressBar" class="progress-bar">0%</div>
     </div>
+
     <h2>Archivos Subidos</h2>
-    <ul id="publicFiles">
+    <ul id="uploadedFiles">
         {% for file in files %}
-            <li><a href="{{ url_for('uploaded_file', filename=file.filename) }}">{{ file.filename }}</a></li>
+        <li><a href="{{ url_for('uploaded_file', filename=file.filename) }}">{{ file.filename }}</a></li>
         {% endfor %}
     </ul>
+
     <h2>Archivos Pendientes</h2>
     <ul id="pendingFiles">
         {% for file in pending_files %}
-            <li>{{ file }}</li>
+        <li>{{ file }}</li>
         {% endfor %}
     </ul>
 
     <script>
-        document.getElementById('uploadForm').onsubmit = function(event) {
-            event.preventDefault();
-            var fileInput = document.getElementById('fileInput');
-            var file = fileInput.files[0];
-            var formData = new FormData();
+        const socket = io();
+        let processing = false;
+
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            notifyReady();
+        });
+
+        socket.on('process_file', (data) => {
+            if (!processing) {
+                processing = true;
+                processFile(data.filename);
+            }
+        });
+
+        function notifyReady() {
+            const ram = navigator.deviceMemory || 4; // in GB, default to 4 if not available
+            const cpu = navigator.hardwareConcurrency || 2; // number of logical cores, default to 2 if not available
+            socket.emit('client_ready', { ram: ram * 1024 * 1024 * 1024, cpu: cpu });
+        }
+
+        function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('Por favor, seleccione un archivo');
+                return;
+            }
+
+            const formData = new FormData();
             formData.append('file', file);
 
-            var xhr = new XMLHttpRequest();
+            const xhr = new XMLHttpRequest();
             xhr.open('POST', '/upload', true);
-
-            // Manejador para el progreso de la subida
-            xhr.upload.onprogress = function(event) {
-                if (event.lengthComputable) {
-                    var percentComplete = (event.loaded / event.total) * 100;
-                    var progressBar = document.getElementById('progressBar');
-                    progressBar.style.width = percentComplete + '%';
-                    progressBar.innerHTML = Math.round(percentComplete) + '%';
-                }
-            };
-
-            xhr.onload = function() {
-                if (xhr.status == 200) {
-                    location.reload();
+            xhr.upload.onprogress = updateProgress;
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    alert('Archivo subido con éxito');
+                    updatePendingFiles(file.name);
                 } else {
-                    alert('Error al subir el archivo.');
+                    alert('Error al subir el archivo');
                 }
             };
-
             xhr.send(formData);
-        };
+        }
+
+        function updateProgress(event) {
+            if (event.lengthComputable) {
+                const percentComplete = (event.loaded / event.total) * 100;
+                document.getElementById('progressBar').style.width = percentComplete + '%';
+                document.getElementById('progressBar').textContent = percentComplete.toFixed(2) + '%';
+            }
+        }
+
+        function updatePendingFiles(filename) {
+            const pendingList = document.getElementById('pendingFiles');
+            const li = document.createElement('li');
+            li.textContent = filename;
+            pendingList.appendChild(li);
+        }
+
+        async function processFile(filename) {
+            try {
+                const response = await fetch(`/uploads/${filename}`);
+                const fileData = await response.arrayBuffer();
+
+                const zip = new JSZip();
+                zip.file(filename, fileData);
+                const compressedData = await zip.generateAsync({type: "arraybuffer"});
+
+                socket.emit('file_processed', {
+                    filename: filename,
+                    compressed_data: compressedData
+                });
+
+                processing = false;
+                notifyReady();
+            } catch (error) {
+                console.error('Error processing file:', error);
+                processing = false;
+                notifyReady();
+            }
+        }
     </script>
 </body>
 </html>
