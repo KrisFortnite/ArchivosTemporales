@@ -4,12 +4,15 @@ import uuid
 import time
 from threading import Thread, Lock
 from queue import Queue
+import zipfile
+import io
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB en bytes
 
 # Esta lista contendrá los archivos subidos con sus tiempos de expiración
 uploaded_files = []
@@ -29,18 +32,30 @@ def delete_expired_files():
                 uploaded_files.remove(file)
         time.sleep(60)
 
+def compress_file(file_content, filename):
+    compressed_file = io.BytesIO()
+    with zipfile.ZipFile(compressed_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(filename, file_content)
+    compressed_file.seek(0)
+    return compressed_file.read(), f"{os.path.splitext(filename)[0]}.zip"
+
 def process_uploads():
     while True:
         if not upload_queue.empty():
             file_info = upload_queue.get()
             filename = file_info['filename']
             file_content = file_info['content']
+            
+            # Comprime el archivo si es mayor a 50 MB
+            if len(file_content) > MAX_FILE_SIZE:
+                file_content, filename = compress_file(file_content, filename)
+            
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             with upload_lock:
                 with open(file_path, 'wb') as f:
                     f.write(file_content)
             uploaded_files.append({'filename': filename, 'expiration': time.time() + 3600})
-            pending_files.remove(filename)
+            pending_files.remove(os.path.splitext(filename)[0])
         time.sleep(1)
 
 # Hilos para la eliminación de archivos caducados y procesamiento de subidas
@@ -66,7 +81,7 @@ def upload_file():
         return jsonify({'error': 'No selected file'}), 400
     if file:
         filename = f"{uuid.uuid4()}_{file.filename}"
-        pending_files.append(filename)
+        pending_files.append(os.path.splitext(filename)[0])
         file_content = file.read()
         upload_queue.put({'filename': filename, 'content': file_content})
         return jsonify({'success': True}), 200
