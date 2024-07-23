@@ -58,53 +58,54 @@
         </ul>
     </div>
     <script>
-        function uploadFile() {
-            var fileInput = document.getElementById('fileInput');
-            var file = fileInput.files[0];
-            var formData = new FormData();
-            formData.append('file', file);
+        const CHUNK_SIZE = 1024 * 1024; // 1MB
 
-            var xhr = new XMLHttpRequest();
-            xhr.open('POST', '/upload', true);
+        async function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-            xhr.upload.onprogress = function(event) {
-                if (event.lengthComputable) {
-                    var percentComplete = (event.loaded / event.total) * 100;
-                    var progressBar = document.getElementById('progressBar');
-                    progressBar.style.width = percentComplete + '%';
-                    progressBar.textContent = percentComplete.toFixed(2) + '%';
-                }
-            };
-
-            xhr.onload = function() {
-                if (xhr.status === 200) {
-                    var response = JSON.parse(xhr.responseText);
-                    addFileToList(response.filename);
-                } else {
-                    alert('Error al subir el archivo');
-                }
-            };
-
-            xhr.send(formData);
-        }
-
-        function addFileToList(filename) {
-            var queueList = document.getElementById('queueList');
-            var uploadedList = document.getElementById('uploadedList');
-            var listItem = document.createElement('li');
-            listItem.textContent = filename;
+            const queueList = document.getElementById('queueList');
+            const uploadedList = document.getElementById('uploadedList');
+            const listItem = document.createElement('li');
+            listItem.textContent = file.name;
             queueList.appendChild(listItem);
 
-            setTimeout(function() {
-                queueList.removeChild(listItem);
-                var uploadedItem = document.createElement('li');
-                uploadedItem.classList.add('file-item');
-                var link = document.createElement('a');
-                link.href = '/uploads/' + filename;
-                link.textContent = filename;
-                uploadedItem.appendChild(link);
-                uploadedList.appendChild(uploadedItem);
-            }, 1000); // Simula la transferencia del archivo a la lista de subidos después de 1 segundo
+            for (let chunkNumber = 0; chunkNumber < totalChunks; chunkNumber++) {
+                const start = chunkNumber * CHUNK_SIZE;
+                const end = Math.min(start + CHUNK_SIZE, file.size);
+                const chunk = file.slice(start, end);
+
+                const formData = new FormData();
+                formData.append('file', chunk);
+                formData.append('filename', file.name);
+                formData.append('chunkNumber', chunkNumber);
+                formData.append('totalChunks', totalChunks);
+
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    alert('Error al subir el archivo');
+                    return;
+                }
+
+                const percentComplete = ((chunkNumber + 1) / totalChunks) * 100;
+                const progressBar = document.getElementById('progressBar');
+                progressBar.style.width = percentComplete + '%';
+                progressBar.textContent = percentComplete.toFixed(2) + '%';
+            }
+
+            queueList.removeChild(listItem);
+            const uploadedItem = document.createElement('li');
+            uploadedItem.classList.add('file-item');
+            const link = document.createElement('a');
+            link.href = '/uploads/' + file.name;
+            link.textContent = file.name;
+            uploadedItem.appendChild(link);
+            uploadedList.appendChild(uploadedItem);
         }
     </script>
 </body>
