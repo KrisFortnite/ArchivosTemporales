@@ -1,47 +1,23 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Subir Archivo</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+    <title>Archivos Temporales</title>
     <style>
         body {
-            background-color: #2e2e2e; /* Fondo gris oscuro */
-            color: #f1f1f1; /* Color de texto claro */
+            background-color: #2c2c2c;
+            color: white;
             font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
         }
-        h1, h2 {
-            color: #ffffff;
+        .upload-section {
+            margin: 20px;
         }
-        form {
-            margin-bottom: 20px;
-        }
-        input[type="file"] {
-            margin-bottom: 10px;
-        }
-        ul {
-            list-style-type: none;
-            padding: 0;
-        }
-        li {
-            margin: 5px 0;
-        }
-        a {
-            color: #1e90ff; /* Color del enlace */
-            text-decoration: none;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
-        .progress-container {
+        .progress-bar {
             width: 100%;
             background-color: #ddd;
         }
-        .progress-bar {
+        .progress {
             width: 0%;
             height: 30px;
             background-color: #4caf50;
@@ -49,115 +25,86 @@
             line-height: 30px;
             color: white;
         }
+        .file-list {
+            margin: 20px 0;
+        }
+        .file-item {
+            margin: 5px 0;
+        }
+        .file-item a {
+            color: #4caf50;
+        }
     </style>
 </head>
 <body>
-    <h1>Subir Archivo</h1>
-
-    <input type="file" id="fileInput">
-    <button onclick="uploadFile()">Subir</button>
-
-    <div class="progress-container">
-        <div id="progressBar" class="progress-bar">0%</div>
+    <div class="upload-section">
+        <input type="file" id="fileInput">
+        <button onclick="uploadFile()">Subir Archivo</button>
+        <div class="progress-bar">
+            <div class="progress" id="progressBar">0%</div>
+        </div>
     </div>
-
-    <h2>Archivos Subidos</h2>
-    <ul id="uploadedFiles">
-        {% for file in files %}
-        <li><a href="{{ url_for('uploaded_file', filename=file.filename) }}">{{ file.filename }}</a></li>
-        {% endfor %}
-    </ul>
-
-    <h2>Archivos Pendientes</h2>
-    <ul id="pendingFiles">
-        {% for file in pending_files %}
-        <li>{{ file }}</li>
-        {% endfor %}
-    </ul>
-
+    <div class="file-list">
+        <h3>Archivos en Cola</h3>
+        <ul id="queueList">
+            <!-- Archivos en cola -->
+        </ul>
+        <h3>Archivos Subidos</h3>
+        <ul id="uploadedList">
+            <!-- Archivos subidos -->
+            {% for filename in files %}
+                <li class="file-item"><a href="/uploads/{{ filename }}">{{ filename }}</a></li>
+            {% endfor %}
+        </ul>
+    </div>
     <script>
-        const socket = io();
-        let processing = false;
-
-        socket.on('connect', () => {
-            console.log('Connected to server');
-            notifyReady();
-        });
-
-        socket.on('process_file', (data) => {
-            if (!processing) {
-                processing = true;
-                processFile(data.filename);
-            }
-        });
-
-        function notifyReady() {
-            const ram = navigator.deviceMemory || 4; // in GB, default to 4 if not available
-            const cpu = navigator.hardwareConcurrency || 2; // number of logical cores, default to 2 if not available
-            socket.emit('client_ready', { ram: ram * 1024 * 1024 * 1024, cpu: cpu });
-        }
-
         function uploadFile() {
-            const fileInput = document.getElementById('fileInput');
-            const file = fileInput.files[0];
-            if (!file) {
-                alert('Por favor, seleccione un archivo');
-                return;
-            }
-
-            const formData = new FormData();
+            var fileInput = document.getElementById('fileInput');
+            var file = fileInput.files[0];
+            var formData = new FormData();
             formData.append('file', file);
 
-            const xhr = new XMLHttpRequest();
+            var xhr = new XMLHttpRequest();
             xhr.open('POST', '/upload', true);
-            xhr.upload.onprogress = updateProgress;
-            xhr.onload = () => {
+
+            xhr.upload.onprogress = function(event) {
+                if (event.lengthComputable) {
+                    var percentComplete = (event.loaded / event.total) * 100;
+                    var progressBar = document.getElementById('progressBar');
+                    progressBar.style.width = percentComplete + '%';
+                    progressBar.textContent = percentComplete.toFixed(2) + '%';
+                }
+            };
+
+            xhr.onload = function() {
                 if (xhr.status === 200) {
-                    alert('Archivo subido con éxito');
-                    updatePendingFiles(file.name);
+                    var response = JSON.parse(xhr.responseText);
+                    addFileToList(response.filename);
                 } else {
                     alert('Error al subir el archivo');
                 }
             };
+
             xhr.send(formData);
         }
 
-        function updateProgress(event) {
-            if (event.lengthComputable) {
-                const percentComplete = (event.loaded / event.total) * 100;
-                document.getElementById('progressBar').style.width = percentComplete + '%';
-                document.getElementById('progressBar').textContent = percentComplete.toFixed(2) + '%';
-            }
-        }
+        function addFileToList(filename) {
+            var queueList = document.getElementById('queueList');
+            var uploadedList = document.getElementById('uploadedList');
+            var listItem = document.createElement('li');
+            listItem.textContent = filename;
+            queueList.appendChild(listItem);
 
-        function updatePendingFiles(filename) {
-            const pendingList = document.getElementById('pendingFiles');
-            const li = document.createElement('li');
-            li.textContent = filename;
-            pendingList.appendChild(li);
-        }
-
-        async function processFile(filename) {
-            try {
-                const response = await fetch(`/uploads/${filename}`);
-                const fileData = await response.arrayBuffer();
-
-                const zip = new JSZip();
-                zip.file(filename, fileData);
-                const compressedData = await zip.generateAsync({type: "arraybuffer"});
-
-                socket.emit('file_processed', {
-                    filename: filename,
-                    compressed_data: compressedData
-                });
-
-                processing = false;
-                notifyReady();
-            } catch (error) {
-                console.error('Error processing file:', error);
-                processing = false;
-                notifyReady();
-            }
+            setTimeout(function() {
+                queueList.removeChild(listItem);
+                var uploadedItem = document.createElement('li');
+                uploadedItem.classList.add('file-item');
+                var link = document.createElement('a');
+                link.href = '/uploads/' + filename;
+                link.textContent = filename;
+                uploadedItem.appendChild(link);
+                uploadedList.appendChild(uploadedItem);
+            }, 1000); // Simula la transferencia del archivo a la lista de subidos después de 1 segundo
         }
     </script>
 </body>
