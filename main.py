@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify
+from flask import Flask, request, render_template, send_from_directory, jsonify
 import os
 import uuid
 import time
@@ -6,11 +6,14 @@ from threading import Thread, Lock
 import zipfile
 import io
 import psutil
-import requests
+import logging
 from flask_socketio import SocketIO, emit
 
+# Configurar logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 app = Flask(__name__)
-socketio = SocketIO(app)
+socketio = SocketIO(app, logger=True, engineio_logger=True)
 UPLOAD_FOLDER = 'uploads'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
@@ -33,8 +36,9 @@ def delete_expired_files():
                 if current_time > file['expiration']:
                     try:
                         os.remove(os.path.join(app.config['UPLOAD_FOLDER'], file['filename']))
-                    except:
-                        pass
+                        logging.info(f"Deleted expired file: {file['filename']}")
+                    except Exception as e:
+                        logging.error(f"Error deleting file {file['filename']}: {str(e)}")
                     uploaded_files.remove(file)
         time.sleep(300)  # Check every 5 minutes to reduce CPU usage
 
@@ -68,11 +72,13 @@ def upload_file():
                     f.write(chunk)
                     chunk = file.read(CHUNK_SIZE)
             
+            logging.info(f"File uploaded: {filename}")
             # Request client to process the file
             socketio.emit('process_file', {'filename': filename}, broadcast=True)
             return jsonify({'success': True}), 200
         except Exception as e:
             pending_files.remove(os.path.splitext(filename)[0])
+            logging.error(f"Error uploading file: {str(e)}")
             return jsonify({'error': str(e)}), 500
 
 @app.route('/uploads/<filename>')
@@ -83,20 +89,21 @@ def uploaded_file(filename):
 def handle_connect():
     client_id = request.sid
     connected_clients[client_id] = {'processing': False}
-    print(f"Client {client_id} connected")
+    logging.info(f"Client {client_id} connected")
 
 @socketio.on('disconnect')
 def handle_disconnect():
     client_id = request.sid
     if client_id in connected_clients:
         del connected_clients[client_id]
-    print(f"Client {client_id} disconnected")
+    logging.info(f"Client {client_id} disconnected")
 
 @socketio.on('client_ready')
 def handle_client_ready(data):
     client_id = request.sid
     connected_clients[client_id]['ram'] = data['ram']
     connected_clients[client_id]['cpu'] = data['cpu']
+    logging.info(f"Client {client_id} ready with RAM: {data['ram']} bytes, CPU: {data['cpu']} cores")
     assign_task()
 
 def assign_task():
@@ -105,6 +112,7 @@ def assign_task():
             filename = pending_files.pop(0)
             client_info['processing'] = True
             socketio.emit('process_file', {'filename': filename}, room=client_id)
+            logging.info(f"Assigned task to process {filename} to client {client_id}")
             break
 
 @socketio.on('file_processed')
@@ -124,8 +132,11 @@ def handle_file_processed(data):
     
     os.remove(os.path.join(app.config['UPLOAD_FOLDER'], filename))
     
+    logging.info(f"File processed: {filename} -> {compressed_filename}")
+    
     connected_clients[client_id]['processing'] = False
     assign_task()
 
 if __name__ == '__main__':
-    socketio.run(app, debug=False, host='0.0.0.0', port=5000)
+    logging.info("Starting the application...")
+    socketio.run(app, debug=False, host='0.0.0.0', port=5000, log_output=True)
