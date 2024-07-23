@@ -4,8 +4,6 @@ import uuid
 import time
 from threading import Thread, Lock
 import zipfile
-import io
-import psutil
 import logging
 from flask_socketio import SocketIO, emit
 
@@ -25,9 +23,6 @@ pending_files = []
 upload_lock = Lock()
 connected_clients = {}
 
-SERVER_RAM_LIMIT = 0.8 * 512 * 1024 * 1024  # 80% of 512 MB in bytes
-SERVER_CPU_LIMIT = 0.08  # 80% of 0.1 CPU
-
 def delete_expired_files():
     while True:
         current_time = time.time()
@@ -41,6 +36,25 @@ def delete_expired_files():
                         logging.error(f"Error deleting file {file['filename']}: {str(e)}")
                     uploaded_files.remove(file)
         time.sleep(300)  # Check every 5 minutes to reduce CPU usage
+
+def compress_file(file_path, output_filename):
+    with zipfile.ZipFile(output_filename, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.write(file_path, os.path.basename(file_path))
+    return output_filename
+
+def process_file(filename):
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    
+    # Compress all files to save space and processing time
+    compressed_filename = f"{os.path.splitext(filename)[0]}.zip"
+    compressed_path = os.path.join(app.config['UPLOAD_FOLDER'], compressed_filename)
+    compress_file(file_path, compressed_path)
+    os.remove(file_path)
+    
+    with upload_lock:
+        uploaded_files.append({'filename': compressed_filename, 'expiration': time.time() + 3600})
+    pending_files.remove(os.path.splitext(filename)[0])
+    logging.info(f"File processed: {filename} -> {compressed_filename}")
 
 delete_thread = Thread(target=delete_expired_files)
 delete_thread.daemon = True
@@ -73,8 +87,8 @@ def upload_file():
                     chunk = file.read(CHUNK_SIZE)
             
             logging.info(f"File uploaded: {filename}")
-            # Request client to process the file
-            socketio.emit('process_file', {'filename': filename}, broadcast=True)
+            # Process the file in a separate thread to avoid blocking
+            Thread(target=process_file, args=(filename,), daemon=True).start()
             return jsonify({'success': True}), 200
         except Exception as e:
             pending_files.remove(os.path.splitext(filename)[0])
@@ -104,38 +118,6 @@ def handle_client_ready(data):
     connected_clients[client_id]['ram'] = data['ram']
     connected_clients[client_id]['cpu'] = data['cpu']
     logging.info(f"Client {client_id} ready with RAM: {data['ram']} bytes, CPU: {data['cpu']} cores")
-    assign_task()
-
-def assign_task():
-    for client_id, client_info in connected_clients.items():
-        if not client_info['processing'] and pending_files:
-            filename = pending_files.pop(0)
-            client_info['processing'] = True
-            socketio.emit('process_file', {'filename': filename}, room=client_id)
-            logging.info(f"Assigned task to process {filename} to client {client_id}")
-            break
-
-@socketio.on('file_processed')
-def handle_file_processed(data):
-    client_id = request.sid
-    filename = data['filename']
-    compressed_data = data['compressed_data']
-    
-    compressed_filename = f"{os.path.splitext(filename)[0]}.zip"
-    compressed_path = os.path.join(app.config['UPLOAD_FOLDER'], compressed_filename)
-    
-    with open(compressed_path, 'wb') as f:
-        f.write(compressed_data)
-    
-    with upload_lock:
-        uploaded_files.append({'filename': compressed_filename, 'expiration': time.time() + 3600})
-    
-    os.remove(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-    
-    logging.info(f"File processed: {filename} -> {compressed_filename}")
-    
-    connected_clients[client_id]['processing'] = False
-    assign_task()
 
 if __name__ == '__main__':
     logging.info("Starting the application...")
