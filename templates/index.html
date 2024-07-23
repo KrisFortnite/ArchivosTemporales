@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Subida de Archivos</title>
+    <style>
+        body {
+            background-color: #2e2e2e; /* Fondo gris oscuro */
+            color: #f1f1f1; /* Color de texto claro */
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        h1, h2 {
+            color: #ffffff;
+        }
+        form {
+            margin-bottom: 20px;
+        }
+        input[type="file"] {
+            margin-bottom: 10px;
+        }
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+        li {
+            margin: 5px 0;
+        }
+        a {
+            color: #1e90ff; /* Color del enlace */
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .progress-container {
+            width: 100%;
+            background-color: #ddd;
+        }
+        .progress-bar {
+            width: 0%;
+            height: 30px;
+            background-color: #4caf50;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <h1>Subir Archivo</h1>
+    <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" name="file" id="fileInput">
+        <input type="submit" value="Subir">
+    </form>
+    <div class="progress-container">
+        <div class="progress-bar" id="progressBar">0%</div>
+    </div>
+    <h2>Archivos Subidos</h2>
+    <ul id="publicFiles">
+        {% for file in files %}
+            <li><a href="{{ url_for('uploaded_file', filename=file.filename) }}">{{ file.filename }}</a></li>
+        {% endfor %}
+    </ul>
+    <h2>Archivos Pendientes</h2>
+    <ul id="pendingFiles">
+        {% for file in pending_files %}
+            <li>{{ file }}</li>
+        {% endfor %}
+    </ul>
+
+    <script>
+        document.getElementById('uploadForm').onsubmit = function(event) {
+            event.preventDefault();
+            var fileInput = document.getElementById('fileInput');
+            var file = fileInput.files[0];
+            var formData = new FormData();
+            formData.append('file', file);
+
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', '/upload', true);
+
+            // Manejador para el progreso de la subida
+            xhr.upload.onprogress = function(event) {
+                if (event.lengthComputable) {
+                    var percentComplete = (event.loaded / event.total) * 100;
+                    var progressBar = document.getElementById('progressBar');
+                    progressBar.style.width = percentComplete + '%';
+                    progressBar.innerHTML = Math.round(percentComplete) + '%';
+                }
+            };
+
+            xhr.onload = function() {
+                if (xhr.status == 200) {
+                    location.reload();
+                } else {
+                    alert('Error al subir el archivo.');
+                }
+            };
+
+            xhr.send(formData);
+        };
+    </script>
+</body>
+</html>
