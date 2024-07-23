@@ -7,6 +7,10 @@ from queue import Queue
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
+
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
