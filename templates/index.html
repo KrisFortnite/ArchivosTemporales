@@ -1,112 +1,150 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Archivos Temporales</title>
     <style>
         body {
-            background-color: #2c2c2c;
-            color: white;
             font-family: Arial, sans-serif;
+            background-color: #333333;
+            color: #ffffff;
+            margin: 0;
+            padding: 20px;
         }
-        .upload-section {
-            margin: 20px;
+        h1, h2 {
+            color: #cccccc;
         }
-        .progress-bar {
+        #fileInput {
+            display: none;
+        }
+        #uploadButton {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+        }
+        #progressBar {
             width: 100%;
             background-color: #ddd;
         }
-        .progress {
+        #progressBar div {
             width: 0%;
             height: 30px;
-            background-color: #4caf50;
+            background-color: #4CAF50;
             text-align: center;
             line-height: 30px;
             color: white;
         }
-        .file-list {
-            margin: 20px 0;
+        ul {
+            list-style-type: none;
+            padding: 0;
         }
-        .file-item {
-            margin: 5px 0;
+        li {
+            margin-bottom: 10px;
         }
-        .file-item a {
-            color: #4caf50;
+        a {
+            color: #4CAF50;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
         }
     </style>
 </head>
 <body>
-    <div class="upload-section">
-        <input type="file" id="fileInput">
-        <button onclick="uploadFile()">Subir Archivo</button>
-        <div class="progress-bar">
-            <div class="progress" id="progressBar">0%</div>
-        </div>
-    </div>
-    <div class="file-list">
-        <h3>Archivos en Cola</h3>
-        <ul id="queueList">
-            <!-- Archivos en cola -->
-        </ul>
-        <h3>Archivos Subidos</h3>
-        <ul id="uploadedList">
-            <!-- Archivos subidos -->
-            {% for filename in files %}
-                <li class="file-item"><a href="/uploads/{{ filename }}">{{ filename }}</a></li>
-            {% endfor %}
-        </ul>
-    </div>
+    <h1>Archivos Temporales</h1>
+    <input type="file" id="fileInput" multiple>
+    <button id="uploadButton">Seleccionar archivos</button>
+    <div id="progressBar"><div></div></div>
+    
+    <h2>Archivos en cola</h2>
+    <ul id="queueList"></ul>
+    
+    <h2>Archivos subidos</h2>
+    <ul id="fileList"></ul>
+
     <script>
-        const CHUNK_SIZE = 1024 * 1024; // 1MB
+        const fileInput = document.getElementById('fileInput');
+        const uploadButton = document.getElementById('uploadButton');
+        const progressBar = document.getElementById('progressBar').firstElementChild;
+        const queueList = document.getElementById('queueList');
+        const fileList = document.getElementById('fileList');
 
-        async function uploadFile() {
-            const fileInput = document.getElementById('fileInput');
-            const file = fileInput.files[0];
-            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        uploadButton.addEventListener('click', () => fileInput.click());
 
-            const queueList = document.getElementById('queueList');
-            const uploadedList = document.getElementById('uploadedList');
-            const listItem = document.createElement('li');
-            listItem.textContent = file.name;
-            queueList.appendChild(listItem);
+        fileInput.addEventListener('change', () => {
+            Array.from(fileInput.files).forEach(file => {
+                uploadFile(file);
+            });
+        });
 
-            for (let chunkNumber = 0; chunkNumber < totalChunks; chunkNumber++) {
-                const start = chunkNumber * CHUNK_SIZE;
-                const end = Math.min(start + CHUNK_SIZE, file.size);
-                const chunk = file.slice(start, end);
+        function uploadFile(file) {
+            const queueItem = document.createElement('li');
+            queueItem.textContent = file.name;
+            queueList.appendChild(queueItem);
 
-                const formData = new FormData();
-                formData.append('file', chunk);
-                formData.append('filename', file.name);
-                formData.append('chunkNumber', chunkNumber);
-                formData.append('totalChunks', totalChunks);
+            const xhr = new XMLHttpRequest();
+            const formData = new FormData();
+            formData.append('file', file);
 
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                if (!response.ok) {
-                    alert('Error al subir el archivo');
-                    return;
+            xhr.upload.onprogress = (event) => {
+                if (event.lengthComputable) {
+                    const percentComplete = (event.loaded / event.total) * 100;
+                    progressBar.style.width = percentComplete + '%';
+                    progressBar.textContent = percentComplete.toFixed(2) + '%';
                 }
+            };
 
-                const percentComplete = ((chunkNumber + 1) / totalChunks) * 100;
-                const progressBar = document.getElementById('progressBar');
-                progressBar.style.width = percentComplete + '%';
-                progressBar.textContent = percentComplete.toFixed(2) + '%';
-            }
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    queueList.removeChild(queueItem);
+                    updateFileList();
+                } else {
+                    console.error('Error al subir el archivo:', xhr.statusText);
+                }
+            };
 
-            queueList.removeChild(listItem);
-            const uploadedItem = document.createElement('li');
-            uploadedItem.classList.add('file-item');
-            const link = document.createElement('a');
-            link.href = '/uploads/' + file.name;
-            link.textContent = file.name;
-            uploadedItem.appendChild(link);
-            uploadedList.appendChild(uploadedItem);
+            xhr.open('POST', '/upload', true);
+            xhr.send(formData);
         }
+
+        function updateFileList() {
+            fetch('/files')
+                .then(response => response.json())
+                .then(files => {
+                    fileList.innerHTML = '';
+                    files.forEach(file => {
+                        const li = document.createElement('li');
+                        const link = document.createElement('a');
+                        link.href = `/download/${file.name}`;
+                        link.textContent = `${file.name} (${formatSize(file.size)}) - ${formatTime(file.remaining_time)}`;
+                        li.appendChild(link);
+                        fileList.appendChild(li);
+                    });
+                });
+        }
+
+        function formatSize(bytes) {
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            if (bytes === 0) return '0 Byte';
+            const i = parseInt(Math.floor(Math.log(bytes) / Math.log(1024)));
+            return Math.round(bytes / Math.pow(1024, i), 2) + ' ' + sizes[i];
+        }
+
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+            return `${minutes}m ${remainingSeconds}s`;
+        }
+
+        setInterval(updateFileList, 1000);
     </script>
 </body>
 </html>
