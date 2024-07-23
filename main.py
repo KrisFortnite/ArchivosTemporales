@@ -5,11 +5,15 @@ from threading import Timer
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
+CHUNK_FOLDER = 'chunks'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['CHUNK_FOLDER'] = CHUNK_FOLDER
 
-# Crear carpeta de subidas si no existe
+# Crear carpetas de subidas y fragmentos si no existen
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
+if not os.path.exists(CHUNK_FOLDER):
+    os.makedirs(CHUNK_FOLDER)
 
 # Mantener un diccionario con los archivos y sus tiempos de subida
 uploaded_files = {}
@@ -20,17 +24,26 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    if 'file' not in request.files:
-        return "No file part", 400
     file = request.files['file']
-    if file.filename == '':
-        return "No selected file", 400
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-    file.save(filepath)
-    uploaded_files[file.filename] = time.time()
-    # Configurar un temporizador para eliminar el archivo después de una hora
-    Timer(3600, delete_file, [file.filename]).start()
-    return jsonify({"filename": file.filename}), 200
+    filename = request.form['filename']
+    chunk_number = int(request.form['chunkNumber'])
+    total_chunks = int(request.form['totalChunks'])
+    
+    chunk_filepath = os.path.join(app.config['CHUNK_FOLDER'], f"{filename}.part{chunk_number}")
+    file.save(chunk_filepath)
+
+    if all(os.path.exists(os.path.join(app.config['CHUNK_FOLDER'], f"{filename}.part{i}")) for i in range(total_chunks)):
+        with open(os.path.join(app.config['UPLOAD_FOLDER'], filename), 'wb') as output_file:
+            for i in range(total_chunks):
+                chunk_filepath = os.path.join(app.config['CHUNK_FOLDER'], f"{filename}.part{i}")
+                with open(chunk_filepath, 'rb') as chunk_file:
+                    output_file.write(chunk_file.read())
+                os.remove(chunk_filepath)
+        
+        uploaded_files[filename] = time.time()
+        Timer(3600, delete_file, [filename]).start()
+    
+    return jsonify({"filename": filename}), 200
 
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
