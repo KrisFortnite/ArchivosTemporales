@@ -1,11 +1,9 @@
-from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify
+from flask import Flask, request, render_template, send_from_directory, jsonify
 import os
 import uuid
 import time
 from threading import Thread, Lock
 from queue import Queue
-import zipfile
-import io
 import psutil
 
 app = Flask(__name__)
@@ -13,12 +11,13 @@ UPLOAD_FOLDER = 'uploads'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB en bytes
 CHUNK_SIZE = 1024 * 1024  # 1 MB
 
 # Límites de recursos (70% del total)
 MAX_RAM_USAGE = 0.7 * 528 * 1024 * 1024  # 70% de 528 MB en bytes
 MAX_CPU_USAGE = 0.7 * 0.1  # 70% de 0.1 CPU
+# Cálculo exacto: 70% de 0.1 es 0.07
+MAX_CPU_USAGE = 0.07
 
 uploaded_files = []
 pending_files = []
@@ -43,11 +42,6 @@ def delete_expired_files():
                     uploaded_files.remove(file)
         time.sleep(60)
 
-def compress_file(file_path, output_filename):
-    with zipfile.ZipFile(output_filename, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.write(file_path, os.path.basename(file_path))
-    return output_filename
-
 def process_uploads():
     while True:
         if not upload_queue.empty():
@@ -55,14 +49,6 @@ def process_uploads():
             if ram_usage < MAX_RAM_USAGE and cpu_usage < MAX_CPU_USAGE:
                 file_info = upload_queue.get()
                 filename = file_info['filename']
-                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                
-                if os.path.getsize(file_path) > MAX_FILE_SIZE:
-                    compressed_filename = f"{os.path.splitext(filename)[0]}.zip"
-                    compressed_path = os.path.join(app.config['UPLOAD_FOLDER'], compressed_filename)
-                    compress_file(file_path, compressed_path)
-                    os.remove(file_path)
-                    filename = compressed_filename
                 
                 with upload_lock:
                     uploaded_files.append({'filename': filename, 'expiration': time.time() + 3600})
